@@ -340,10 +340,14 @@ Status changes are not cosmetic. They can enqueue or stop work.
   write.
 - Any of these can be recorded without starting a run — see `--no-start` above.
 - Statuses follow the issue's **workflow** (the project's, or Default). A
-  workflow step can carry a handoff: entering that status gives the issue to
-  its handler (an agent, squad, member, project lead or creator) with the
-  step's instructions, so a status change can start a run for someone other
-  than the assignee. Before moving an issue in a project, read its workflow:
+  workflow step can carry a handoff: entering that status hands the issue to
+  the step's handler with its instructions. A handoff to an agent starts that
+  agent's run, so a status change can wake someone other than the assignee; a
+  handoff to a member assigns without starting anything. An issue created in a
+  project **without an assignee** goes straight to its status's handler, so an
+  agent handler starts at once; create it in `backlog` to start nothing. The
+  docs do not say whether `--no-start` suppresses a handoff, so do not rely on
+  it. Before moving or creating an issue in a project, read its workflow:
 
 ```bash
 multica project workflow get <project-id>
