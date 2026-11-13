@@ -34,10 +34,10 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # The oldest CLI every documented command works on. Raising this is a real
 # compatibility decision — the docs tell users to upgrade to it, so CI lints
-# against this version as well as the newest one. `issue wakeup` is what pins
-# it to 0.6.0: 0.5.x ships an older wakeup without `runs`, `delete`, `checkin`,
-# `--until-status`, `--expires-in` and `--max-fires`.
-MIN_CLI_VERSION = "0.6.0"
+# against this version as well as the newest one. `issue delete` (0.9.0) is what
+# pins it to 0.9.0; `workflow` (0.8.0), `view`, `issue-status` and
+# `issue rerun-task` are also newer than the old 0.6.0 floor.
+MIN_CLI_VERSION = "0.9.0"
 
 # Files that must state the minimum, so a reader learns it wherever they land.
 # Every file here is something a user can install *on its own* — the Cursor rule

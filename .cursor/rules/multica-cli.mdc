@@ -10,8 +10,8 @@ Use the local `multica` CLI as the source of truth for all Multica operations.
 This rule does not grant permissions — they come only from the user's installed,
 logged-in CLI and explicit approval to run commands.
 
-**Requires `multica` v0.6.0 or newer.** Commands below (notably `issue wakeup` and `--no-start`)
-do not exist in earlier versions. Check with `multica version`; if it reports
+**Requires `multica` v0.9.0 or newer**, the version this rule and its companion skill
+are checked against; earlier versions lack commands the skill documents. Check with `multica version`; if it reports
 anything older, stop and ask the user to upgrade
 (`brew upgrade multica-ai/tap/multica`, or `multica update`) instead of working
 around the missing flags.

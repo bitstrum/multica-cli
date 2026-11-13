@@ -1,6 +1,6 @@
 ---
 name: multica-cli
-description: "Use when a local coding agent (Codex, Claude Code, Cursor, or similar) needs to operate Multica through the authenticated `multica` CLI: reading or updating issues, comments, metadata, labels, custom properties, subscribers, projects, agents, squads, runtimes, repos, skills, autopilots, attachments, or workspace state; searching issues; inspecting or cancelling agent runs; replying to a Multica issue from an external agent; creating or triaging issues; checking linked pull requests; or safely handling Multica mention/status side effects without relying on the Multica hosted agent runtime."
+description: "Use when a local coding agent (Codex, Claude Code, Cursor, or similar) needs to operate Multica through the authenticated `multica` CLI: reading or updating issues, comments, metadata, labels, custom properties, subscribers, projects, workflows, saved views, agents, squads, runtimes, repos, skills, autopilots, attachments, or workspace state; searching issues; deleting issues; inspecting or cancelling agent runs; replying to a Multica issue from an external agent; creating or triaging issues; checking linked pull requests; or safely handling Multica mention/status side effects without relying on the Multica hosted agent runtime."
 ---
 
 # Multica CLI
@@ -20,15 +20,15 @@ multica auth status
 multica config show
 ```
 
-**This skill requires `multica` v0.6.0 or newer.** Several commands it relies
-on — notably `issue wakeup`, and `--no-start` on `issue status` / `assign` /
-`update` — do not exist
-in earlier versions, and an older CLI will reject them outright. If
-`multica version` reports anything below 0.6.0, stop and ask the user to
-upgrade (`brew upgrade multica-ai/tap/multica`, or `multica update`) rather than
-working around the missing flags.
+**This skill requires `multica` v0.9.0 or newer.** Several commands it relies
+on — notably `issue delete`, `issue rerun-task`, `workflow`, `view` and
+`issue-status` — do not exist in earlier versions, and an older CLI will reject
+them outright. If `multica version` reports anything below 0.9.0, stop and ask
+the user to upgrade (`brew upgrade multica-ai/tap/multica`, or `multica update`)
+rather than working around the missing commands. Self-hosted: keep the CLI at
+the server's version.
 
-**This file was last checked against `multica` v0.6.2.** The CLI ships faster
+**This file was last checked against `multica` v0.9.0.** The CLI ships faster
 than this skill. When `multica version` reports a newer version, assume
 commands or flags exist that this file does not describe: treat
 `multica <command> --help` as the source of truth, and check `multica --help`
@@ -88,9 +88,17 @@ multica issue comment list <id> --recent N --compact --output json              
 multica issue create --title "..." [--description-file <path>] [--priority <p>] [--status <s>] [--assignee <name> | --assignee-id <uuid>] [--parent <id>] [--stage N] [--project <id>] [--due-date YYYY-MM-DD] [--start-date YYYY-MM-DD] [--attachment <path>] [--attachment-id <uuid>] [--allow-duplicate] --output json
 multica issue update <id> [--title "..."] [--description-file <path>] [--status <s>] [--priority <p>] [--assignee <name> | --assignee-id <uuid>] [--parent <id> | --parent ""] [--stage N] [--due-date YYYY-MM-DD] [--start-date YYYY-MM-DD] [--no-start]
 
-# Status / assignment  (status values: backlog | todo | in_progress | in_review | done | blocked | cancelled)
-multica issue status <id> <status> [--no-start]
+# Status / assignment — <status> is a status KEY. Built-in: backlog | todo | in_progress | in_review | done | blocked | cancelled;
+# a workspace can add custom keys (multica issue-status list). An unknown key errors with the full list.
+multica issue status <id> <status> [--no-start] [--duplicate-of <original-id>]   # --duplicate-of needs cancelled
 multica issue assign <id> --to <name> | --to-id <uuid> | --unassign [--no-start]
+
+# Saved views — read the issue lists people curate in the app
+multica view list --output json
+multica view issues <view> [--limit N] [--cursor <next_cursor>] [--fields id,identifier,title,status] --output json
+
+# Delete — permanent; see Write Workflow
+multica issue delete <id>... [--yes]
 
 # Comment (write) — body always via file, see Write Workflow below
 # --parent is required when a comment triggered your task; see Issue Comments
@@ -122,6 +130,7 @@ multica issue runs <issue-id> --output json
 multica issue run-messages <task-id> [--issue <issue-id>] [--since N] --output json
 multica issue usage <issue-id> --output json
 multica issue rerun <id> --output json
+multica issue rerun-task <run-id> [--issue <issue-id>] [--fresh] --output json
 multica issue cancel-task <task-id> [--issue <issue-id>]
 
 # Wakeups — rules that start agent runs later; see Wakeups below
@@ -152,6 +161,8 @@ multica label --help
 multica property --help
 multica chat --help
 multica user --help
+multica workflow --help       # statuses + handoffs; see Status and Assignment Side Effects
+multica issue-status --help   # the workspace status catalog (create/update/archive are admin changes)
 ```
 
 ## Reading Comments
@@ -197,8 +208,15 @@ field is a display hint, not a filter.
 
 Treat writes as side-effecting. If the user did not clearly ask for the write,
 ask before running it. This includes creating comments, issues, status changes,
-assignments, reruns, cancellations, label and property changes, agent mentions,
-squad mentions, webhook/autopilot changes, and repo checkout operations.
+assignments, reruns, cancellations, deletions, label and property changes,
+agent mentions, squad mentions, workflow and status-catalog changes,
+webhook/autopilot changes, and repo checkout operations.
+
+`multica issue delete` cannot be undone: it removes the issue's comments and
+attachments, cancels its in-flight runs, and detaches (does not delete) its
+children. Delete only issues the user named, and pass `--yes` only after the
+user confirmed that exact list; without `--yes` a non-interactive run fails
+without deleting, which is the safe outcome.
 
 ### File Paths Must Be Inside the Working Directory
 
@@ -321,6 +339,20 @@ Status changes are not cosmetic. They can enqueue or stop work.
 - `in_review` is useful while a PR or human review is pending, but it is still a
   write.
 - Any of these can be recorded without starting a run — see `--no-start` above.
+- Statuses follow the issue's **workflow** (the project's, or Default). A
+  workflow step can carry a handoff: entering that status gives the issue to
+  its handler (an agent, squad, member, project lead or creator) with the
+  step's instructions, so a status change can start a run for someone other
+  than the assignee. Before moving an issue in a project, read its workflow:
+
+```bash
+multica project workflow get <project-id>
+multica workflow get <workflow> --output json    # "default" for the Default workflow
+```
+
+Changing a workflow or its handoffs (`workflow create|update|delete`,
+`workflow handoff set`, `project workflow set`) rewires who gets woken for every
+issue that uses it; treat it as an admin change and do it only when asked.
 
 When creating sub-issues for ordered work, use stages and `backlog` for later
 steps. The parent assignee is woken only when every sub-issue in a stage
@@ -350,12 +382,16 @@ this move to in_review?" is answered by the timeline, not the comment list.
 
 `--issue` lets you pass a short task-id prefix instead of the full UUID.
 
-Two controls are genuinely disruptive — confirm both with the user first:
+Three controls are genuinely disruptive — confirm each with the user first:
 
 ```bash
 multica issue rerun <id> --output json          # re-enqueue the current assignment as a new task
+multica issue rerun-task <run-id> --issue <issue-id> --output json  # repeat that run's agent, even after a reassignment
 multica issue cancel-task <task-id> --issue <issue-id>   # interrupt a running agent mid-flight
 ```
+
+`rerun-task` always starts a paid run. By default it reuses the source run's
+working directory and resumes its session; `--fresh` starts clean.
 
 `cancel-task` interrupts an in-flight agent, so work in progress is lost. Never
 run it to "clean up" state you have not read.
