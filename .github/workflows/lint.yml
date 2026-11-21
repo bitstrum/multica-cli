@@ -3,6 +3,12 @@ name: Lint
 # A skill that describes a CLI is only correct relative to a CLI version, so the
 # schedule matters as much as the push trigger: the CLI can move under a
 # repository that never changes, and that is exactly how this skill went stale.
+#
+# The skill always describes the newest release and marks everything added after its
+# floor with the release that introduced it, so an agent on an older server loads only
+# what works there. Every marked release is linted on that very release; coverage is
+# checked on the newest. A scheduled run that finds new drift opens or updates one
+# `cli-drift` issue instead of failing, so a Multica release is a task, not an alarm.
 on:
   push:
     branches: [main]
@@ -15,73 +21,135 @@ permissions:
   contents: read
 
 jobs:
+  versions:
+    name: Releases to lint against
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.list.outputs.matrix }}
+      latest: ${{ steps.list.outputs.latest }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - id: list
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          latest=$(scripts/resolve-cli-version.sh latest)
+          matrix=$({ scripts/lint-skill-commands.py --versions | sed 's/^/v/'; echo "$latest"; } | sort -uV | jq -Rnc '[inputs]')
+          echo "latest=${latest}" >> "${GITHUB_OUTPUT}"
+          echo "matrix=${matrix}" >> "${GITHUB_OUTPUT}"
+          echo "Linting against ${matrix} (latest ${latest})"
+
   skill-commands:
     name: Docs match the CLI (${{ matrix.cli }})
+    needs: versions
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
     strategy:
       fail-fast: false
       matrix:
-        # `min` is the version README/SKILL.md tell users to install, so every
-        # documented command must work there. `latest` catches new drift. Both
-        # have to pass: dropping `min` lets the docs quietly raise the floor,
-        # dropping `latest` lets the CLI move out from under them.
-        cli: [min, latest]
+        cli: ${{ fromJSON(needs.versions.outputs.matrix) }}
+    env:
+      LATEST: ${{ needs.versions.outputs.latest }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - name: Resolve CLI version
-        id: resolve
-        run: |
-          set -euo pipefail
-          if [ "${{ matrix.cli }}" = "min" ]; then
-            version="v$(python3 -c 'import re,pathlib; print(re.search(r"MIN_CLI_VERSION = \"([^\"]+)\"", pathlib.Path("scripts/lint-skill-commands.py").read_text()).group(1))')"
-          else
-            version="$(curl -fsSL https://api.github.com/repos/multica-ai/multica/releases/latest | jq -r .tag_name)"
-          fi
-          echo "version=${version}" >> "${GITHUB_OUTPUT}"
-          echo "Resolved ${{ matrix.cli }} -> ${version}"
-
       - name: Install the multica CLI
-        env:
-          VERSION: ${{ steps.resolve.outputs.version }}
         run: |
-          set -euo pipefail
-          asset="multica-cli-${VERSION#v}-linux-amd64.tar.gz"
-          base="https://github.com/multica-ai/multica/releases/download/${VERSION}"
-          mkdir -p "${RUNNER_TEMP}/multica-cli" "${HOME}/.local/bin"
-          curl -fsSL -o "${RUNNER_TEMP}/${asset}" "${base}/${asset}"
-          curl -fsSL -o "${RUNNER_TEMP}/checksums.txt" "${base}/checksums.txt"
-
-          # Verify before executing a downloaded binary. Anchor the filename to
-          # end-of-line and require exactly one match, so a substring can never
-          # satisfy the check.
-          cd "${RUNNER_TEMP}"
-          matches="$(grep -c -E "[[:space:]]${asset}$" checksums.txt || true)"
-          if [ "${matches}" != "1" ]; then
-            echo "::error::expected exactly 1 checksum entry for ${asset}, found ${matches}"
-            exit 1
-          fi
-          if ! grep -E "[[:space:]]${asset}$" checksums.txt | sha256sum --check --status; then
-            echo "::error::checksum verification failed for ${asset}"
-            exit 1
-          fi
-          echo "checksum OK: ${asset}"
-          cd - >/dev/null
-
-          tar -xzf "${RUNNER_TEMP}/${asset}" -C "${RUNNER_TEMP}/multica-cli"
-          install -m 0755 "${RUNNER_TEMP}/multica-cli/multica" "${HOME}/.local/bin/multica"
+          scripts/install-cli.sh "${{ matrix.cli }}"
           echo "${HOME}/.local/bin" >> "${GITHUB_PATH}"
-
-      - name: Show CLI version under test
-        run: multica version
 
       - name: Lint regression tests
         run: scripts/test-lint.py
 
+      # Older releases never change, so only the newest can drift on a schedule.
       - name: Lint documented commands
+        id: lint
+        shell: bash
+        continue-on-error: ${{ github.event_name == 'schedule' && matrix.cli == needs.versions.outputs.latest }}
         run: |
-          if [ "${{ matrix.cli }}" = "min" ]; then
-            scripts/lint-skill-commands.py --verbose --validity-only
+          if [ "${{ matrix.cli }}" = "${LATEST}" ]; then mode=(); else mode=(--validity-only); fi
+          scripts/lint-skill-commands.py --verbose "${mode[@]}" 2>&1 | tee lint.log
+
+      - name: Open or update the drift issue
+        if: steps.lint.outcome == 'failure'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title="Document multica ${LATEST}: the skill has drifted from the latest CLI"
+          { echo "The daily lint against multica ${LATEST} failed:"; echo; echo '```'; grep -A2 '^  - ' lint.log | head -c 60000; echo '```'
+            echo; echo "Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            echo; echo "Mark new surface with \`(${LATEST}+)\` rather than raising the floor (README, Contributing)."; } > body.md
+          gh label create cli-drift --color D93F0B --description "The skill no longer matches the latest multica CLI" --force >/dev/null
+          open=$(gh issue list --label cli-drift --state open --json number,title -q '.[] | "\(.number)\t\(.title)"' | head -1)
+          if [ -z "${open}" ]; then gh issue create --title "${title}" --label cli-drift --body-file body.md
           else
-            scripts/lint-skill-commands.py --verbose
+            n=${open%%$'\t'*}; gh issue edit "${n}" --title "${title}" --body-file body.md
+            [ "${open#*$'\t'}" = "${title}" ] || gh issue comment "${n}" --body "multica ${LATEST} is out; the description now lists its drift."
           fi
+
+  lint-ok:
+    name: Lint OK
+    if: always()
+    needs: [versions, skill-commands]
+    runs-on: ubuntu-latest
+    steps:
+      - run: test "${{ needs.versions.result }}" = success && test "${{ needs.skill-commands.result }}" = success
+
+  # The checks below exist because agent PRs merge themselves. They skip (and so pass)
+  # for the repository owner, who reviews their own changes.
+  scope-guard:
+    name: Scope guard
+    if: github.event_name == 'pull_request'
+    needs: versions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - name: Check what the PR changes
+        run: |
+          scripts/check-pr-scope.py \
+            --base "${{ github.event.pull_request.base.sha }}" \
+            --head "${{ github.event.pull_request.head.sha }}" \
+            --author "${{ github.event.pull_request.user.login }}" \
+            --owner "${{ github.repository_owner }}" \
+            --latest-version "${{ needs.versions.outputs.latest }}"
+
+  evals:
+    name: Skill evals
+    # Same-repo PRs only: a fork's PR never gets the Claude token.
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    needs: versions
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - name: Install Claude Code, its Bash sandbox, and the latest multica CLI
+        run: |
+          test -n "${CLAUDE_CODE_OAUTH_TOKEN}" || { echo "::error::CLAUDE_CODE_OAUTH_TOKEN secret is not set (claude setup-token)"; exit 1; }
+          sudo apt-get update -qq && sudo apt-get install -y -qq bubblewrap socat
+          curl -fsSL https://claude.ai/install.sh | bash
+          echo "${HOME}/.local/bin" >> "${GITHUB_PATH}"
+          scripts/install-cli.sh "${{ needs.versions.outputs.latest }}"
+      - name: Behaviour evals (stub CLI, no server)
+        run: scripts/run-evals.sh --runs 2 --threshold 1 --concurrency 4 --max-cost-usd 10 --json evals-result.json
+      - name: Behaviour claims are backed by --help
+        if: github.event.pull_request.user.login != github.repository_owner
+        run: scripts/check-claims.sh "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}"
+      - name: Keep the eval report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: evals
+          path: |
+            evals-result.json
+            evals/results/
+          if-no-files-found: ignore

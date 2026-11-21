@@ -2,9 +2,9 @@
 
 There are two ways to use the Multica CLI skill in Cursor.
 
-Both require the `multica` CLI at **v0.11.1 or newer** — earlier versions lack
-commands the skill and the rule rely on (notably `inbox`, `issue batch` and `view create`). Check with
-`multica version`.
+Both need the `multica` CLI and the Multica server at **v0.6.0 or newer**. Commands
+added later are marked with the release that introduced them, and the agent skips
+those your CLI or server is too old for. Check with `multica version`.
 
 ## Option 1: Personal Agent Skill (recommended)
 

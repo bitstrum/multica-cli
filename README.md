@@ -39,14 +39,27 @@ The skill lives at `skills/multica-cli/`. Pick the path for your tool.
 ### Claude Code (plugin marketplace)
 
 ```text
-/plugin marketplace add multica-ai/multica-cli
+/plugin marketplace add bitstrum/multica-cli
 /plugin install multica-cli@multica-cli
+```
+
+The skill follows each Multica release, so let Claude Code pull updates: in
+`/plugin` → Marketplaces, enable auto-update for `multica-cli`, or declare it in
+`~/.claude/settings.json`:
+
+```json
+"extraKnownMarketplaces": {
+  "multica-cli": {
+    "source": { "source": "github", "repo": "bitstrum/multica-cli" },
+    "autoUpdate": true
+  }
+}
 ```
 
 ### Codex (skill installer)
 
 ```bash
-install-skill-from-github.py --repo multica-ai/multica-cli --path skills/multica-cli
+install-skill-from-github.py --repo bitstrum/multica-cli --path skills/multica-cli
 ```
 
 Restart Codex after installing new skills.
@@ -70,9 +83,12 @@ your tool loads skills or instructions from.
 
 ## Requirements
 
-- The `multica` CLI is installed locally, at **v0.11.1 or newer**. Earlier
-  versions lack commands the skill relies on (notably `inbox`, `issue batch`,
-  `issue pull-requests link` and `view create`), and will reject them. Check with `multica version`.
+- The `multica` CLI is installed locally, and both it and the Multica server are
+  at **v0.6.0 or newer**. The skill always describes the newest release, and marks
+  everything added after v0.6.0 with the release that introduced it, such as
+  `(v0.10.0+)`. The agent checks the CLI (`multica version`) and the server (its
+  public `/api/config`; Multica Cloud always runs the latest), then uses only what
+  the older of the two supports and tells you what an upgrade would unlock.
 - The user has run `multica login` (or `multica setup`) to authenticate.
 - The intended workspace/profile is selected, or passed explicitly with
   `--workspace-id` and `--profile`.
@@ -92,16 +108,35 @@ authorized that exact action. See [EXAMPLES.md](./EXAMPLES.md) for more.
 ## Contributing
 
 This skill is only useful while it matches the CLI it describes, so the docs are
-linted against a real `multica` binary:
+linted against real `multica` binaries:
 
 ```bash
-scripts/lint-skill-commands.py            # or --verbose to see every check
+scripts/lint-skill-commands.py              # against the multica on PATH; --verbose shows every check
+scripts/lint-skill-commands.py --versions   # the floor and every release a marker names
 ```
 
-It fails when a documented command or flag no longer exists, and when a CLI
-command exists that `SKILL.md` never mentions. Deliberate omissions belong in
-`UNDOCUMENTED_OK` in that script, with a reason. CI runs it on every push and
-on a daily schedule, so drift surfaces as a failure rather than as a stale skill.
+It fails when a documented command or flag is missing from the release its marker
+(or the floor) names, and when the newest CLI has a command `SKILL.md` never
+mentions. Document new surface with a marker, `(vX.Y.Z+)` in prose or
+`# vX.Y.Z+` in a code block, rather than raising the floor; deliberate omissions
+go in `UNDOCUMENTED_OK` in that script, with a reason.
+
+CI runs the lint against the floor, every marked release and the latest release
+on every push and pull request. A daily run checks the latest release; when a new
+release adds or changes commands, it opens or updates one `cli-drift` issue
+instead of failing.
+
+Pull requests from an agent merge themselves once every check is green, so a PR
+from anyone but the repository owner also has to pass:
+
+- `scripts/check-pr-scope.py`: docs, manifests and the `UNDOCUMENTED_OK` region of
+  the lint script only (never CI, tests, evals or the floor); no marker above the latest
+  release; no SKILL.md heading removed; plugin version bumped.
+- `scripts/run-evals.sh`: behaviour evals in `evals/` (`claude plugin eval`
+  against a stub `multica`, so no server is touched), such as "reading the inbox
+  changes nothing" and "a delete never passes `--yes` unasked".
+- `scripts/check-claims.sh`: an LLM check that every behaviour claim the PR adds
+  is backed by the CLI's `--help`.
 
 ## License
 

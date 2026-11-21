@@ -10,10 +10,20 @@ This skill is only useful while it matches the CLI it describes. Two checks run:
             after the docs were last touched — the failure mode that actually
             happened, where the skill silently lost half the issue namespace.
 
+The docs cover every CLI from MIN_CLI_VERSION up. Surface added later carries a
+version marker such as `(v0.10.0+)`, and an agent skips what is newer than the
+lower of its CLI and its server. A marker applies to the line it is on, to a code
+block's lines up to the next blank line when it sits on a comment-only line, to its
+paragraph or list item in prose, and to a whole section when it is in the heading.
+Validity therefore runs against the installed CLI for exactly the lines whose
+version it meets, and CI runs it once per marked version (`--versions`), so every
+marker is proven on the release it names.
+
 Deliberate omissions go in UNDOCUMENTED_OK below, with a reason.
 
 Usage:
-  scripts/lint-skill-commands.py [--verbose]
+  scripts/lint-skill-commands.py [--verbose] [--validity-only]
+  scripts/lint-skill-commands.py --versions     # the floor and every marked version
 
 Requires the `multica` CLI on PATH. Only `--help` is invoked, so no login,
 network, or workspace is needed.
@@ -33,12 +43,12 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # The oldest CLI every documented command works on. Raising this is a real
-# compatibility decision — the docs tell users to upgrade to it, so CI lints
-# against this version as well as the newest one. `inbox count` and the inbox
-# writes (0.11.1) are what pin it to 0.11.1; `inbox list` (0.11.0), `issue batch`,
-# `issue pull-requests link` and `view create` (0.10.0) are also newer than the
-# old 0.9.0 floor.
-MIN_CLI_VERSION = "0.11.1"
+# compatibility decision — the docs tell users on older versions to upgrade — so
+# CI lints against it as well as every marked version and the newest release.
+# 0.6.0 is the first release with the whole `issue wakeup` namespace; everything
+# newer is marked instead of raising the floor, so older self-hosted servers keep
+# the parts that work for them.
+MIN_CLI_VERSION = "0.6.0"
 
 # Files that must state the minimum, so a reader learns it wherever they land.
 # Every file here is something a user can install *on its own* — the Cursor rule
@@ -84,6 +94,19 @@ HELP_SUBCOMMAND = re.compile(r"^\s{2,}([a-z][a-z0-9-]*):\s")
 
 FENCED = re.compile(r"^```(\w*)\s*$")
 INLINE_CODE = re.compile(r"`([^`\n]+)`")
+# `(v0.10.0+)` in prose and headings, `# v0.10.0+` in code comments.
+MARKER = re.compile(r"(?<![\w.])v(\d+\.\d+\.\d+)\+")
+HEADING = re.compile(r"^(#{1,6}) ")
+LIST_ITEM = re.compile(r"^\s*(?:[-*]|\d+\.) ")
+
+
+def ver(s: str) -> tuple[int, ...]:
+    return tuple(int(x) for x in re.findall(r"\d+", s)[:3])
+
+
+def line_marker(text: str) -> tuple[int, ...] | None:
+    found = [ver(m) for m in MARKER.findall(text)]
+    return max(found) if found else None
 
 
 class CliMissing(Exception):
@@ -179,29 +202,72 @@ def declared_subcommands(help_text: str) -> set[str]:
     return found
 
 
-def extract_command_lines(text: str) -> list[tuple[int, str]]:
-    """Pull `multica ...` invocations out of fenced shell blocks and inline code."""
+def extract_command_lines(text: str) -> list[tuple[int, str, tuple[int, ...] | None]]:
+    """Pull `multica ...` invocations out of fenced shell blocks and inline code,
+    each with the version marker that applies to it (None: the floor)."""
     lines = text.splitlines()
-    out: list[tuple[int, str]] = []
+    out: list[tuple[int, str, tuple[int, ...] | None]] = []
     fence_lang: str | None = None
+    headings: dict[int, tuple[int, ...] | None] = {}
+    group: tuple[int, ...] | None = None  # comment-only marker line in a code block
+
+    # Prose markers cover their paragraph or list item, which may wrap.
+    para: dict[int, tuple[int, ...] | None] = {}
+    segment: list[int] = []
+
+    def close() -> None:
+        m = max((x for x in (line_marker(lines[j]) for j in segment) if x), default=None)
+        para.update((j, m) for j in segment)
+        segment.clear()
+
+    inside = False
+    for j, raw in enumerate(lines):
+        if FENCED.match(raw):
+            close()
+            inside = not inside
+        elif inside:
+            continue
+        elif not raw.strip() or HEADING.match(raw):
+            close()
+        else:
+            if LIST_ITEM.match(raw):
+                close()
+            segment.append(j)
+    close()
+
+    def newest(*vs: tuple[int, ...] | None) -> tuple[int, ...] | None:
+        vs = tuple(v for v in vs if v)
+        return max(vs) if vs else None
 
     for idx, raw in enumerate(lines, start=1):
         fence = FENCED.match(raw)
         if fence:
             fence_lang = None if fence_lang is not None else (fence.group(1) or "")
+            group = None
             continue
+        section = newest(*headings.values())
 
         if fence_lang is not None:
-            if fence_lang in ("bash", "sh", "shell", ""):
-                candidate = raw.strip()
-                if candidate.startswith("multica "):
-                    out.append((idx, candidate))
+            candidate = raw.strip()
+            if not candidate:
+                group = None
+            elif candidate.startswith("#"):
+                group = line_marker(candidate) or group
+            elif fence_lang in ("bash", "sh", "shell", "") and candidate.startswith("multica "):
+                out.append((idx, candidate, newest(section, group, line_marker(candidate))))
+            continue
+
+        h = HEADING.match(raw)
+        if h:
+            level = len(h.group(1))
+            headings = {k: v for k, v in headings.items() if k < level}
+            headings[level] = line_marker(raw)
             continue
 
         for span in INLINE_CODE.findall(raw):
             span = span.strip()
             if span.startswith("multica "):
-                out.append((idx, span))
+                out.append((idx, span, newest(section, para.get(idx - 1))))
 
     return out
 
@@ -288,7 +354,30 @@ def resolve_path(tokens: list[str], top_level: set[str]) -> tuple[str, list[str]
     return None
 
 
-def check_validity(verbose: bool) -> list[str]:
+def installed_version() -> tuple[int, ...]:
+    out = subprocess.run(["multica", "version"], capture_output=True, text=True, timeout=30).stdout
+    m = re.search(r"\d+\.\d+\.\d+", out)
+    return ver(m.group(0)) if m else (0, 0, 0)
+
+
+def marked_versions() -> list[str]:
+    """The floor plus every version a marker in the docs names, oldest first."""
+    found = {ver(MIN_CLI_VERSION)}
+    for rel in DOC_FILES:
+        path = REPO_ROOT / rel
+        if path.exists():
+            found |= {ver(m) for m in MARKER.findall(path.read_text(encoding="utf-8"))}
+    return [".".join(map(str, v)) for v in sorted(found)]
+
+
+def check_validity(verbose: bool, cli: tuple[int, ...] | None = None) -> list[str]:
+    """Check every documented line whose version the installed CLI meets.
+
+    A marker at or below the floor says nothing and goes stale when the floor is
+    raised, so it is reported rather than silently accepted.
+    """
+    cli = cli or installed_version()
+    floor = ver(MIN_CLI_VERSION)
     root_help = cli_help("")
     assert root_help is not None
     top_level = declared_subcommands(root_help)
@@ -296,7 +385,7 @@ def check_validity(verbose: bool) -> list[str]:
     global_flags = set(global_flag_specs)
 
     errors: list[str] = []
-    checked = 0
+    checked = skipped = 0
 
     for rel in DOC_FILES:
         path = REPO_ROOT / rel
@@ -304,7 +393,17 @@ def check_validity(verbose: bool) -> list[str]:
             errors.append(f"{rel}: listed in DOC_FILES but missing from the repo")
             continue
 
-        for lineno, line in extract_command_lines(path.read_text(encoding="utf-8")):
+        text = path.read_text(encoding="utf-8")
+        for lineno, raw in enumerate(text.splitlines(), start=1):
+            for m in MARKER.findall(raw):
+                if ver(m) <= floor:
+                    errors.append(f"{rel}:{lineno}: marker v{m}+ is not above the floor v{MIN_CLI_VERSION}; drop it")
+        for lineno, line, since in extract_command_lines(text):
+            if since and since > cli:
+                skipped += 1
+                if verbose:
+                    print(f"  --  {rel}:{lineno}  needs v{'.'.join(map(str, since))}+, skipped")
+                continue
             tokens = normalize(line)
             if not tokens or tokens[0] != "multica":
                 continue
@@ -349,7 +448,7 @@ def check_validity(verbose: bool) -> list[str]:
                 print(f"  ok  {rel}:{lineno}  multica {cmd_path}")
 
     if verbose:
-        print(f"\nvalidity: {checked} documented invocations resolved")
+        print(f"\nvalidity: {checked} documented invocations resolved, {skipped} marked newer than this CLI")
     return errors
 
 
@@ -416,7 +515,16 @@ def main() -> int:
             "an exemption for a command that version predates is not a stale exemption."
         ),
     )
+    parser.add_argument(
+        "--versions",
+        action="store_true",
+        help="print the floor and every version a marker names, one per line, and exit (no CLI needed)",
+    )
     args = parser.parse_args()
+
+    if args.versions:
+        print("\n".join(marked_versions()))
+        return 0
 
     if shutil.which("multica") is None:
         print(
@@ -432,7 +540,11 @@ def main() -> int:
         version = subprocess.run(["multica", "version"], capture_output=True, text=True, timeout=30).stdout.strip()
         print(f"Linting docs against: {version.splitlines()[0] if version else 'multica (unknown version)'}")
         print(f"Declared minimum:     v{MIN_CLI_VERSION}\n")
-        errors = check_declared_version(args.verbose) + check_validity(args.verbose)
+        cli = installed_version()
+        if cli < ver(MIN_CLI_VERSION):
+            print(f"error: the installed CLI is older than the floor v{MIN_CLI_VERSION}", file=sys.stderr)
+            return 2
+        errors = check_declared_version(args.verbose) + check_validity(args.verbose, cli)
         if args.validity_only:
             print("\n(coverage check skipped: --validity-only)")
         else:

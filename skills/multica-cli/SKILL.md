@@ -20,19 +20,38 @@ multica auth status
 multica config show
 ```
 
-**This skill requires `multica` v0.11.1 or newer.** Several commands it relies
-on — notably `inbox`, `issue batch`, `issue pull-requests link`, `view create`
-and `issue delete` — do not exist in earlier versions, and an older CLI will
-reject them outright. If `multica version` reports anything below 0.11.1, stop and ask
-the user to upgrade (`brew upgrade multica-ai/tap/multica`, or `multica update`)
-rather than working around the missing commands. Self-hosted: keep the CLI at
-the server's version.
+**Versions.** This skill covers `multica` **v0.6.0 or newer** and was last
+checked against v0.11.1. Anything added after v0.6.0 is marked with the release
+that introduced it. `(v0.10.0+)` in a heading covers that section, and in a
+sentence it covers that paragraph or list item. In a code block, `# v0.10.0+`
+covers its own line, or, on a comment line of its own, every line below it up to
+the next blank line. A marked command needs that release on **both** the CLI and
+the server. **Never run a marked command before you have checked both
+versions** in this session; one check covers the rest of it. Pass the same
+`--profile` you use for everything else:
 
-**This file was last checked against `multica` v0.11.1.** The CLI ships faster
-than this skill. When `multica version` reports a newer version, assume
-commands or flags exist that this file does not describe: treat
-`multica <command> --help` as the source of truth, and check `multica --help`
-and `multica issue --help` before telling the user the CLI cannot do something.
+```bash
+multica version        # the CLI
+multica config show    # server_url: the server this profile talks to
+curl -fsS <server_url>/api/config | grep -o '"server_version":"[^"]*"'
+```
+
+- Your working version is the lower of the two. A self-hosted server answers
+  with its release. Multica Cloud (server_url unset or on multica.ai) omits
+  `server_version` and always runs the latest release, so there the CLI decides.
+  `/api/config` is public and needs no token; it is the only HTTP call this
+  skill makes.
+- Skip everything marked above your working version: do not try it, and do not
+  route around it. Tell the user which release it needs and who upgrades it: the
+  CLI with `multica update` (or `brew upgrade multica-ai/tap/multica`), a
+  self-hosted server through its operator. A newer CLI may also refuse a call
+  with "this server version does not support …"; that means the same thing.
+- Below v0.6.0 on either side, stop and ask the user to upgrade.
+- Newer than v0.11.1: assume commands or flags exist that this file does not
+  describe. Treat `multica <command> --help` as the source of truth, and check
+  `multica --help` and `multica issue --help` before telling the user the CLI
+  cannot do something.
+
 If this skill sits inside a checkout or plugin install of its repository,
 `scripts/lint-skill-commands.py` (two directories above this file) lists the
 drift in under a second; it only runs `--help`.
@@ -87,22 +106,22 @@ multica issue comment list <id> --recent N --compact --output json              
 # Create / update
 multica issue create --title "..." [--description-file <path>] [--priority <p>] [--status <s>] [--assignee <name> | --assignee-id <uuid>] [--parent <id>] [--stage N] [--project <id>] [--due-date YYYY-MM-DD] [--start-date YYYY-MM-DD] [--attachment <path>] [--attachment-id <uuid>] [--allow-duplicate] --output json
 multica issue update <id> [--title "..."] [--description-file <path>] [--status <s>] [--priority <p>] [--assignee <name> | --assignee-id <uuid>] [--parent <id> | --parent ""] [--stage N] [--due-date YYYY-MM-DD] [--start-date YYYY-MM-DD] [--no-start]
-# Same change on many issues; one row per issue, non-zero exit if any was skipped. Dry-run first.
+# v0.10.0+: the same change on many issues; one row per issue, non-zero exit if any was skipped. Dry-run first.
 multica issue batch update <id>... [--ids-stdin] [--status <s>] [--priority <p>] [--assignee <name> | --assignee-id <uuid> | --unassign] [--add-label <l>] [--remove-label <l>] [--property Name=Value] [--dry-run] [--no-start] --output json
 
 # Status / assignment — <status> is a status KEY. Built-in: backlog | todo | in_progress | in_review | done | blocked | cancelled;
 # a workspace can add custom keys (multica issue-status list). An unknown key errors with the full list.
-multica issue status <id> <status> [--no-start] [--duplicate-of <original-id>]   # --duplicate-of needs cancelled
+multica issue status <id> <status> [--no-start] [--duplicate-of <original-id>]   # --duplicate-of (v0.6.1+) needs cancelled
 multica issue assign <id> --to <name> | --to-id <uuid> | --unassign [--no-start]
 
-# Saved views — the issue lists people curate in the app; writes show in their sidebar, see Saved Views
+# Saved views (v0.8.1+) — the issue lists people curate in the app; writes show in their sidebar, see Saved Views
 multica view list --output json
 multica view issues <view> [--limit N] [--cursor <next_cursor>] [--fields id,identifier,title,status] --output json
-multica view create --name "..." [--status <s>]... [--assignee <name>]... [--label <l>]... [--visibility private|workspace] [--dry-run] --output json
-multica view update <view> [--status <s>]... [--clear-filters] [--dry-run] --output json
-multica view delete <view>
+multica view create --name "..." [--status <s>]... [--assignee <name>]... [--label <l>]... [--visibility private|workspace] [--dry-run] --output json   # v0.10.0+
+multica view update <view> [--status <s>]... [--clear-filters] [--dry-run] --output json   # v0.10.0+
+multica view delete <view>   # v0.10.0+
 
-# Delete — permanent; see Write Workflow
+# Delete (v0.10.0+) — permanent; see Write Workflow
 multica issue delete <id>... [--dry-run] [--yes]
 
 # Comment (write) — body always via file, see Write Workflow below
@@ -135,7 +154,7 @@ multica issue runs <issue-id> --output json
 multica issue run-messages <task-id> [--issue <issue-id>] [--since N] --output json
 multica issue usage <issue-id> --output json
 multica issue rerun <id> --output json
-multica issue rerun-task <run-id> [--issue <issue-id>] [--fresh] --output json
+multica issue rerun-task <run-id> [--issue <issue-id>] [--fresh] --output json   # v0.7.2+
 multica issue cancel-task <task-id> [--issue <issue-id>]
 
 # Wakeups — rules that start agent runs later; see Wakeups below
@@ -147,7 +166,7 @@ multica issue wakeup create <issue-id> (--event <type> | --until-status <s> | --
 multica issue wakeup disable <issue-id> <wakeup-id>
 multica issue wakeup delete <issue-id> <wakeup-id>
 
-# Inbox — the signed-in person's notifications; reads are safe, writes change their state (see Inbox)
+# Inbox (v0.11.1+) — the signed-in person's notifications; reads are safe, writes change their state (see Inbox)
 multica inbox list [--unread] [--issue <key>] [--since 1d] [--archived | --snoozed] --output json
 multica inbox count --output json
 multica inbox read <notification-id>... | --issue <key>
@@ -172,8 +191,8 @@ multica label --help
 multica property --help
 multica chat --help
 multica user --help
-multica workflow --help       # statuses + handoffs; see Status and Assignment Side Effects
-multica issue-status --help   # the workspace status catalog (create/update/archive are admin changes)
+multica workflow --help       # v0.8.0+: statuses + handoffs; see Status and Assignment Side Effects
+multica issue-status --help   # v0.8.2+: the workspace status catalog (create/update/archive are admin changes)
 ```
 
 ## Reading Comments
@@ -224,7 +243,7 @@ agent mentions, squad mentions, workflow and status-catalog changes,
 saved-view, inbox and linked-PR changes, project archive/restore,
 webhook/autopilot changes, and repo checkout operations.
 
-`multica issue delete` cannot be undone: it removes the issue's comments and
+`multica issue delete` (v0.10.0+) cannot be undone: it removes the issue's comments and
 attachments, cancels its in-flight runs, and detaches (does not delete) its
 children. Delete only issues the user named. `--dry-run` checks the selection
 and your permission and lists what would go, so show the user that list and pass
@@ -352,7 +371,7 @@ Status changes are not cosmetic. They can enqueue or stop work.
 - `in_review` is useful while a PR or human review is pending, but it is still a
   write.
 - Any of these can be recorded without starting a run — see `--no-start` above.
-- Statuses follow the issue's **workflow** (the project's, or Default). A
+- (v0.8.0+) Statuses follow the issue's **workflow** (the project's, or Default). A
   workflow step can carry a handoff: entering that status hands the issue to
   the step's handler with its instructions. A handoff to an agent starts that
   agent's run, so a status change can wake someone other than the assignee; a
@@ -363,21 +382,22 @@ Status changes are not cosmetic. They can enqueue or stop work.
   it. Before moving or creating an issue in a project, read its workflow:
 
 ```bash
+# v0.8.0+
 multica project workflow get <project-id>
 multica workflow get <workflow> --output json    # "default" for the Default workflow
 ```
 
-`multica issue batch update` can start agent runs just like `issue update`,
+`multica issue batch update` (v0.10.0+) can start agent runs just like `issue update`,
 except that it can do so on every issue it changes; `--no-start` applies the
 change without starting any. Run it with `--dry-run` first and read the rows
 before writing.
 
-Archiving a project (`multica project archive <id>`) stops it accepting new
+Archiving a project (`multica project archive <id>`, v0.10.0+) stops it accepting new
 issues and **pauses every autopilot that files into it**; `project restore`
 does not resume them. Tell the user which autopilots that affects before
 archiving. `project list` hides archived projects unless you pass `--archived`.
 
-Changing a workflow or its handoffs (`workflow create|update|delete`,
+Changing a workflow or its handoffs (v0.8.0+: `workflow create|update|delete`,
 `workflow handoff set`, `project workflow set`) rewires who gets woken for every
 issue that uses it; treat it as an admin change and do it only when asked.
 
@@ -413,11 +433,11 @@ Three controls are genuinely disruptive — confirm each with the user first:
 
 ```bash
 multica issue rerun <id> --output json          # re-enqueue the current assignment as a new task
-multica issue rerun-task <run-id> --issue <issue-id> --output json  # repeat that run's agent, even after a reassignment
+multica issue rerun-task <run-id> --issue <issue-id> --output json  # v0.7.2+: repeat that run's agent, even after a reassignment
 multica issue cancel-task <task-id> --issue <issue-id>   # interrupt a running agent mid-flight
 ```
 
-`rerun-task` always starts a paid run. By default it reuses the source run's
+`rerun-task` (v0.7.2+) always starts a paid run. By default it reuses the source run's
 working directory and resumes its session; `--fresh` starts clean.
 
 `cancel-task` interrupts an in-flight agent, so work in progress is lost. Never
@@ -440,11 +460,11 @@ re-enabling one is a write that needs the user's approval.
 - To stop a rule, `disable` keeps it for later; `delete` also withdraws runs
   that have not started.
 
-`multica chat wakeup` is a different command: it brings an agent back to a
+`multica chat wakeup` (v0.11.0+) is a different command: it brings an agent back to a
 Multica chat conversation and is meant for an agent running inside that chat.
 For follow-ups on issue work, use the issue wakeups above.
 
-## Inbox
+## Inbox (v0.11.1+)
 
 `multica inbox` is the notification inbox of the account the CLI is signed in
 as — the user's own, not an agent's. `inbox list` and `inbox count` are
@@ -466,7 +486,7 @@ waiting for me".
   runtime owner is the human who triggered the task. A refusal there is a result
   to report, not something to route around.
 
-## Saved Views
+## Saved Views (v0.10.0+)
 
 `view create|update|duplicate|delete` write the same views the web app saves,
 so they appear in people's sidebars. `<view>` is an ID, ID prefix or exact
@@ -501,8 +521,8 @@ metadata:
 
 ```bash
 multica issue pull-requests <issue-id> --output json
-multica issue pull-requests link <issue-id> <pr-url>   # PR already synced, but its title/branch lacks the key
-multica issue pull-requests unlink <issue-id> <pr>     # URL, number or id; remembered until link restores it
+multica issue pull-requests link <issue-id> <pr-url>   # v0.10.0+: PR already synced, but its title/branch lacks the key
+multica issue pull-requests unlink <issue-id> <pr>     # v0.10.0+: URL, number or id; remembered until link restores it
 ```
 
 Linking and unlinking are writes; do them only when asked.
@@ -512,7 +532,8 @@ Linking and unlinking are writes; do them only when asked.
 The CLI does not cover every Multica surface. When the command you need does not
 exist, say so plainly, name the step, and point the user at Multica Web to
 finish it. Never let a partial run read as a completed one, and never reach for
-`curl` or a private HTTP API to close the gap.
+`curl` or a private HTTP API to close the gap (the public version check under
+Start Safely is the one exception).
 
 Report what actually happened: which commands ran, which succeeded, and what is
 left for the user. A refused or failed command is a result to report, not a
