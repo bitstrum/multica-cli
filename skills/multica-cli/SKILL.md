@@ -26,8 +26,9 @@ that introduced it. `(v0.10.0+)` in a heading covers that section, and in a
 sentence it covers that paragraph or list item. In a code block, `# v0.10.0+`
 covers its own line, or, on a comment line of its own, every line below it up to
 the next blank line. A marked command needs that release on **both** the CLI and
-the server, so work out your working version once, before the first marked
-command (pass the same `--profile` you use for everything else):
+the server. **Never run a marked command before you have checked both
+versions** in this session; one check covers the rest of it. Pass the same
+`--profile` you use for everything else:
 
 ```bash
 multica version        # the CLI
