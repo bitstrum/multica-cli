@@ -36,14 +36,27 @@ skill 位于 `skills/multica-cli/`，按你使用的工具选择安装方式。
 ### Claude Code（插件市场）
 
 ```text
-/plugin marketplace add multica-ai/multica-cli
+/plugin marketplace add bitstrum/multica-cli
 /plugin install multica-cli@multica-cli
+```
+
+skill 会跟随每个 Multica 版本更新，所以请让 Claude Code 自动拉取更新：在
+`/plugin` → Marketplaces 中为 `multica-cli` 开启自动更新，或在
+`~/.claude/settings.json` 中声明：
+
+```json
+"extraKnownMarketplaces": {
+  "multica-cli": {
+    "source": { "source": "github", "repo": "bitstrum/multica-cli" },
+    "autoUpdate": true
+  }
+}
 ```
 
 ### Codex（skill 安装器）
 
 ```bash
-install-skill-from-github.py --repo multica-ai/multica-cli --path skills/multica-cli
+install-skill-from-github.py --repo bitstrum/multica-cli --path skills/multica-cli
 ```
 
 安装新 skill 后请重启 Codex。
@@ -67,8 +80,10 @@ cp -R skills/multica-cli/* ~/.cursor/skills/multica-cli/
 
 ## 前置条件
 
-- 本机已安装 `multica` CLI，且版本 **不低于 v0.11.1**。更早的版本缺少本 skill 依赖的
-  命令（尤其是 `inbox`、`issue batch`、`issue pull-requests link` 和 `view create`），会直接报错。可用 `multica version` 确认。
+- 本机已安装 `multica` CLI，且 CLI 和 Multica 服务端版本都 **不低于 v0.6.0**。skill
+  始终描述最新版本，并把 v0.6.0 之后新增的内容标注为引入它的版本，例如 `(v0.10.0+)`。
+  agent 会检查 CLI（`multica version`）和服务端（其公开的 `/api/config`；Multica Cloud
+  始终运行最新版本），只使用两者中较旧一方支持的功能，并告诉你升级后能用什么。
 - 用户已通过 `multica login`（或 `multica setup`）完成认证。
 - 已选择目标 workspace / profile，或通过 `--workspace-id`、`--profile` 显式传入。
 
@@ -89,12 +104,28 @@ cp -R skills/multica-cli/* ~/.cursor/skills/multica-cli/
 `multica` 二进制做 lint：
 
 ```bash
-scripts/lint-skill-commands.py            # 加 --verbose 可看到每一条检查
+scripts/lint-skill-commands.py              # 对照 PATH 上的 multica；加 --verbose 可看到每一条检查
+scripts/lint-skill-commands.py --versions   # 最低版本以及标注中出现的每个版本
 ```
 
-当文档里写的命令或 flag 已经不存在、或者 CLI 里有 `SKILL.md` 从未提及的命令时，
-lint 会失败。有意不写的部分请加进该脚本的 `UNDOCUMENTED_OK` 并注明原因。CI 在每次
-push 和每日定时任务中运行它，让漂移以失败的形式暴露出来，而不是变成一个过期的 skill。
+当文档里写的命令或 flag 在其标注版本（或最低版本）中不存在、或者最新 CLI 里有
+`SKILL.md` 从未提及的命令时，lint 会失败。新增功能请加版本标注（正文里写
+`(vX.Y.Z+)`，代码块里写 `# vX.Y.Z+`），而不是提高最低版本；有意不写的部分请加进
+该脚本的 `UNDOCUMENTED_OK` 并注明原因。
+
+CI 在每次 push 和 pull request 时，对最低版本、每个标注版本和最新版本运行 lint。每日
+定时任务检查最新版本：新版本增加或修改命令时，它会创建或更新一个 `cli-drift` issue，
+而不是让运行失败。
+
+agent 提交的 PR 在所有检查通过后会自动合并，所以仓库所有者以外的 PR 还必须通过：
+
+- `scripts/check-pr-scope.py`：只能改文档、manifest 和 lint 脚本中的 `UNDOCUMENTED_OK`
+  区域（不能改 CI、测试、eval 或最低版本）；标注不高于最新版本；不删除 SKILL.md 的标题；
+  插件版本号已提升。
+- `scripts/run-evals.sh`：`evals/` 中的行为 eval（用 `claude plugin eval` 对着一个
+  stub `multica` 运行，不会接触任何服务端），例如“读取 inbox 不改变任何状态”和
+  “删除时绝不擅自加 `--yes`”。
+- `scripts/check-claims.sh`：由 LLM 检查 PR 新增的每条行为描述都有 CLI `--help` 支持。
 
 ## 许可证
 

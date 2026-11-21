@@ -207,6 +207,56 @@ def main() -> int:
         expect=None,
     )
 
+    # 7. Version markers. A line marked newer than the installed CLI is skipped, and
+    #    the marker reaches exactly as far as documented: its own line, a code block up
+    #    to the next blank line, a prose paragraph or list item, a heading's section.
+    #    v99 is newer than any real CLI; a marker the CLI meets must still be checked.
+    check(
+        "line marked newer than the CLI is skipped",
+        run_case(linter, skill_body=block("multica frobnicate   # v99.0.0+") + covered),
+        expect=None,
+    )
+    check(
+        "line marked at or below the CLI is still checked",
+        run_case(linter, skill_body=block("multica frobnicate   # v0.6.1+") + covered),
+        expect="has no command `frobnicate`",
+    )
+    check(
+        "comment-line marker ends at the blank line",
+        run_case(linter, skill_body=block("# v99.0.0+", "multica frobnicate", "", "multica frobnicate2") + covered),
+        expect="has no command `frobnicate2`",
+    )
+    check(
+        "comment-line marker covers its group",
+        run_case(linter, skill_body=block("# v99.0.0+", "multica frobnicate", "multica frobnicate2") + covered),
+        expect=None,
+    )
+    check(
+        "heading marker covers its section",
+        run_case(linter, skill_body="## New (v99.0.0+)\n\n" + block("multica frobnicate") + covered),
+        expect=None,
+    )
+    check(
+        "heading marker ends at the next heading of its level",
+        run_case(linter, skill_body="## New (v99.0.0+)\n\n## Old\n\n" + block("multica frobnicate") + covered),
+        expect="has no command `frobnicate`",
+    )
+    check(
+        "prose marker covers its wrapped paragraph",
+        run_case(linter, skill_body="Run\n`multica frobnicate` (v99.0.0+) here.\n" + covered),
+        expect=None,
+    )
+    check(
+        "prose marker stops at the next list item",
+        run_case(linter, skill_body="- new (v99.0.0+)\n- run `multica frobnicate`\n" + covered),
+        expect="has no command `frobnicate`",
+    )
+    check(
+        "marker at or below the floor is reported",
+        run_case(linter, skill_body=block(f"multica issue get MUL-1   # v{linter.MIN_CLI_VERSION}+") + covered),
+        expect="is not above the floor",
+    )
+
     print()
     if failures:
         print(f"{len(failures)} test(s) failed:\n", file=sys.stderr)

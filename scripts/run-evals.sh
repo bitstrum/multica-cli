@@ -7,5 +7,6 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 stub=$(mktemp -d /tmp/multica-eval-stub.XXXXXX); trap 'rm -rf "$stub"' EXIT
 install -m 755 evals/stub/multica "$stub/multica"
+ln -s multica "$stub/curl"   # the skill's server version check, answered offline
 PATH="$stub:$PATH" claude plugin eval . --trust-plugin --no-publish --ablation none \
-  --allow-tools "Bash(multica *)" Write Read --model sonnet "$@"
+  --allow-tools "Bash(multica *)" "Bash(curl *)" Write Read --model sonnet "$@"

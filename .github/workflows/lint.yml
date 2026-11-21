@@ -4,10 +4,11 @@ name: Lint
 # schedule matters as much as the push trigger: the CLI can move under a
 # repository that never changes, and that is exactly how this skill went stale.
 #
-# This fork tracks the owner's own Multica server, not upstream's latest release:
-# `server` lints against the release that server runs (MULTICA_SERVER_URL secret;
-# without it, latest). The server upgrades weekly and then starts an agent that
-# documents the drift in a PR; that PR merges itself only when every job below passes.
+# The skill always describes the newest release and marks everything added after its
+# floor with the release that introduced it, so an agent on an older server loads only
+# what works there. Every marked release is linted on that very release; coverage is
+# checked on the newest. A scheduled run that finds new drift opens or updates one
+# `cli-drift` issue instead of failing, so a Multica release is a task, not an alarm.
 on:
   push:
     branches: [main]
@@ -20,72 +21,109 @@ permissions:
   contents: read
 
 jobs:
+  versions:
+    name: Releases to lint against
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.list.outputs.matrix }}
+      latest: ${{ steps.list.outputs.latest }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - id: list
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          latest=$(scripts/resolve-cli-version.sh latest)
+          matrix=$({ scripts/lint-skill-commands.py --versions | sed 's/^/v/'; echo "$latest"; } | sort -uV | jq -Rnc '[inputs]')
+          echo "latest=${latest}" >> "${GITHUB_OUTPUT}"
+          echo "matrix=${matrix}" >> "${GITHUB_OUTPUT}"
+          echo "Linting against ${matrix} (latest ${latest})"
+
   skill-commands:
     name: Docs match the CLI (${{ matrix.cli }})
+    needs: versions
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
     strategy:
       fail-fast: false
       matrix:
-        # `min` is the version README/SKILL.md tell users to install, so every
-        # documented command must work there. `server` catches new drift. Both
-        # have to pass: dropping `min` lets the docs quietly raise the floor,
-        # dropping `server` lets the CLI move out from under them.
-        cli: [min, server]
+        cli: ${{ fromJSON(needs.versions.outputs.matrix) }}
+    env:
+      LATEST: ${{ needs.versions.outputs.latest }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - name: Resolve CLI version
-        id: resolve
-        env:
-          GH_TOKEN: ${{ github.token }}
-          MULTICA_SERVER_URL: ${{ secrets.MULTICA_SERVER_URL }}
-        run: |
-          version="$(scripts/resolve-cli-version.sh ${{ matrix.cli }})"
-          echo "version=${version}" >> "${GITHUB_OUTPUT}"
-          echo "Resolved ${{ matrix.cli }} -> ${version}"
-
       - name: Install the multica CLI
         run: |
-          scripts/install-cli.sh "${{ steps.resolve.outputs.version }}"
+          scripts/install-cli.sh "${{ matrix.cli }}"
           echo "${HOME}/.local/bin" >> "${GITHUB_PATH}"
 
       - name: Lint regression tests
         run: scripts/test-lint.py
 
+      # Older releases never change, so only the newest can drift on a schedule.
       - name: Lint documented commands
+        id: lint
+        shell: bash
+        continue-on-error: ${{ github.event_name == 'schedule' && matrix.cli == needs.versions.outputs.latest }}
         run: |
-          if [ "${{ matrix.cli }}" = "min" ]; then
-            scripts/lint-skill-commands.py --verbose --validity-only
+          if [ "${{ matrix.cli }}" = "${LATEST}" ]; then mode=(); else mode=(--validity-only); fi
+          scripts/lint-skill-commands.py --verbose "${mode[@]}" 2>&1 | tee lint.log
+
+      - name: Open or update the drift issue
+        if: steps.lint.outcome == 'failure'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title="Document multica ${LATEST}: the skill has drifted from the latest CLI"
+          { echo "The daily lint against multica ${LATEST} failed:"; echo; echo '```'; grep -A2 '^  - ' lint.log | head -c 60000; echo '```'
+            echo; echo "Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            echo; echo "Mark new surface with \`(${LATEST}+)\` rather than raising the floor (README, Contributing)."; } > body.md
+          gh label create cli-drift --color D93F0B --description "The skill no longer matches the latest multica CLI" --force >/dev/null
+          open=$(gh issue list --label cli-drift --state open --json number,title -q '.[] | "\(.number)\t\(.title)"' | head -1)
+          if [ -z "${open}" ]; then gh issue create --title "${title}" --label cli-drift --body-file body.md
           else
-            scripts/lint-skill-commands.py --verbose
+            n=${open%%$'\t'*}; gh issue edit "${n}" --title "${title}" --body-file body.md
+            [ "${open#*$'\t'}" = "${title}" ] || gh issue comment "${n}" --body "multica ${LATEST} is out; the description now lists its drift."
           fi
+
+  lint-ok:
+    name: Lint OK
+    if: always()
+    needs: [versions, skill-commands]
+    runs-on: ubuntu-latest
+    steps:
+      - run: test "${{ needs.versions.result }}" = success && test "${{ needs.skill-commands.result }}" = success
 
   # The checks below exist because agent PRs merge themselves. They skip (and so pass)
   # for the repository owner, who reviews their own changes.
   scope-guard:
     name: Scope guard
     if: github.event_name == 'pull_request'
+    needs: versions
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
       - name: Check what the PR changes
-        env:
-          GH_TOKEN: ${{ github.token }}
-          MULTICA_SERVER_URL: ${{ secrets.MULTICA_SERVER_URL }}
         run: |
           scripts/check-pr-scope.py \
             --base "${{ github.event.pull_request.base.sha }}" \
             --head "${{ github.event.pull_request.head.sha }}" \
             --author "${{ github.event.pull_request.user.login }}" \
             --owner "${{ github.repository_owner }}" \
-            --server-version "$(scripts/resolve-cli-version.sh server)"
+            --latest-version "${{ needs.versions.outputs.latest }}"
 
   evals:
     name: Skill evals
     # Same-repo PRs only: a fork's PR never gets the Claude token.
     if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    needs: versions
     runs-on: ubuntu-latest
     timeout-minutes: 40
     env:
@@ -94,16 +132,13 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
-      - name: Install Claude Code, its Bash sandbox, and the server's multica CLI
-        env:
-          GH_TOKEN: ${{ github.token }}
-          MULTICA_SERVER_URL: ${{ secrets.MULTICA_SERVER_URL }}
+      - name: Install Claude Code, its Bash sandbox, and the latest multica CLI
         run: |
           test -n "${CLAUDE_CODE_OAUTH_TOKEN}" || { echo "::error::CLAUDE_CODE_OAUTH_TOKEN secret is not set (claude setup-token)"; exit 1; }
           sudo apt-get update -qq && sudo apt-get install -y -qq bubblewrap socat
           curl -fsSL https://claude.ai/install.sh | bash
           echo "${HOME}/.local/bin" >> "${GITHUB_PATH}"
-          scripts/install-cli.sh "$(scripts/resolve-cli-version.sh server)"
+          scripts/install-cli.sh "${{ needs.versions.outputs.latest }}"
       - name: Behaviour evals (stub CLI, no server)
         run: scripts/run-evals.sh --runs 2 --threshold 1 --concurrency 4 --max-cost-usd 10 --json evals-result.json
       - name: Behaviour claims are backed by --help

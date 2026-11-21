@@ -4,18 +4,19 @@
 The skill-update agent's PRs auto-merge once CI is green, so CI has to stop the ways a
 green lint can still be a bad merge. A PR from anyone but the repository owner may only:
 
-  - touch the docs, the plugin manifests and two marked regions of the lint script
-    (MIN_CLI_VERSION with its comment, and UNDOCUMENTED_OK) — never CI, tests or evals,
-    which would let it grade itself
-  - raise the floor no higher than the CLI the server runs (--server-version)
-  - keep every heading of SKILL.md and its frontmatter name, so safety sections cannot
-    quietly disappear
+  - touch the docs, the plugin manifests and the UNDOCUMENTED_OK region of the lint
+    script — never CI, tests or evals, which would let it grade itself, and never the
+    floor (MIN_CLI_VERSION): new surface gets a version marker instead, so users on
+    older servers keep the rest
+  - mark nothing above the latest release (--latest-version), which CI cannot test
+  - keep every heading of SKILL.md (markers aside) and its frontmatter name, so safety
+    sections cannot quietly disappear
   - bump the plugin version in both manifests when the skill changes, so installed
     copies refresh
   - stay under --max-lines changed lines in SKILL.md
 
 Usage: check-pr-scope.py --base <sha> --head <sha> --author <login> --owner <login>
-                         --server-version vX.Y.Z [--max-lines N]
+                         --latest-version vX.Y.Z [--max-lines N]
 """
 
 from __future__ import annotations
@@ -41,6 +42,7 @@ ALLOWED = {
 LINT = "scripts/lint-skill-commands.py"
 SKILL = "skills/multica-cli/SKILL.md"
 MANIFESTS = (".claude-plugin/plugin.json", ".claude-plugin/marketplace.json")
+MARKER = re.compile(r"(?<![\w.])v(\d+\.\d+\.\d+)\+")
 
 
 def git(*args: str) -> str:
@@ -59,10 +61,8 @@ def ver(s: str) -> tuple[int, ...]:
 
 
 def lint_outside_regions(text: str) -> str:
-    """The lint script with the two regions an agent may edit cut out."""
-    text = re.sub(r"(?ms)^# The oldest CLI every documented command works on\..*?^MIN_CLI_VERSION = \"[^\"]+\"\n", "<MIN>\n", text)
-    text = re.sub(r"(?ms)^UNDOCUMENTED_OK = \{\n.*?^\}\n", "<UNDOCUMENTED_OK>\n", text)
-    return text
+    """The lint script with the one region an agent may edit cut out."""
+    return re.sub(r"(?ms)^UNDOCUMENTED_OK = \{\n.*?^\}\n", "<UNDOCUMENTED_OK>\n", text)
 
 
 def plugin_versions(rev: str) -> list[str]:
@@ -76,7 +76,7 @@ def plugin_versions(rev: str) -> list[str]:
 
 def main() -> int:
     p = argparse.ArgumentParser()
-    for flag in ("--base", "--head", "--author", "--owner", "--server-version"):
+    for flag in ("--base", "--head", "--author", "--owner", "--latest-version"):
         p.add_argument(flag, required=True)
     p.add_argument("--max-lines", type=int, default=300)
     a = p.parse_args()
@@ -92,17 +92,19 @@ def main() -> int:
             errors.append(f"{f}: outside what a self-merging PR may change")
 
     if LINT in changed and lint_outside_regions(show(a.base, LINT)) != lint_outside_regions(show(a.head, LINT)):
-        errors.append(f"{LINT}: changed outside MIN_CLI_VERSION and UNDOCUMENTED_OK")
+        errors.append(f"{LINT}: changed outside UNDOCUMENTED_OK (the floor stays the owner's call)")
 
-    m = re.search(r'MIN_CLI_VERSION = "([^"]+)"', show(a.head, LINT))
-    if not m:
-        errors.append(f"{LINT}: MIN_CLI_VERSION not found")
-    elif ver(m.group(1)) > ver(a.server_version):
-        errors.append(f"MIN_CLI_VERSION {m.group(1)} is above the server's CLI {a.server_version}")
+    for f in changed:
+        if f in ALLOWED and not f.endswith((".json", ".py", ".yaml")):
+            for n, line in enumerate(show(a.head, f).splitlines(), start=1):
+                for m in MARKER.findall(line):
+                    if ver(m) > ver(a.latest_version):
+                        errors.append(f"{f}:{n}: marker v{m}+ is above the latest release {a.latest_version}")
 
     base_skill, head_skill = show(a.base, SKILL), show(a.head, SKILL)
     heading = re.compile(r"^#{1,4} .+$", re.M)
-    prose = lambda t: re.sub(r"(?ms)^```.*?^```", "", t)  # `# comments` in code blocks are not headings
+    # `# comments` in code blocks are not headings; adding a version marker is not a rename.
+    prose = lambda t: MARKER.sub("", re.sub(r"(?ms)^```.*?^```", "", t)).replace(" ()", "")
     for h in sorted(set(heading.findall(prose(base_skill))) - set(heading.findall(prose(head_skill)))):
         errors.append(f"{SKILL}: heading removed or renamed: {h!r}")
     name = re.compile(r"^name: .+$", re.M)

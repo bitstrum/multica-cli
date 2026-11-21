@@ -10,11 +10,15 @@ Use the local `multica` CLI as the source of truth for all Multica operations.
 This rule does not grant permissions — they come only from the user's installed,
 logged-in CLI and explicit approval to run commands.
 
-**Requires `multica` v0.11.1 or newer**, the version this rule and its companion skill
-are checked against; earlier versions lack commands the skill documents. Check with `multica version`; if it reports
-anything older, stop and ask the user to upgrade
-(`brew upgrade multica-ai/tap/multica`, or `multica update`) instead of working
-around the missing flags.
+**Requires `multica` v0.6.0 or newer** on both the CLI and the server; this rule and
+its companion skill were last checked against v0.11.1. Check the CLI with
+`multica version` and a self-hosted server with
+`curl -fsS <server_url from multica config show>/api/config` (its `server_version`;
+Multica Cloud omits it and always runs the latest release). If either is older than
+v0.6.0, stop and ask the user to upgrade (`multica update` for the CLI). The skill
+marks later commands with the release that added them, as `(vX.Y.Z+)`: skip
+any whose release is above the lower of the two versions and tell the user what it
+needs, instead of working around it.
 
 ## Core rules
 
