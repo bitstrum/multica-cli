@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Stand-in `multica` for the skill evals: no server, no side effects. It answers reads
+# with small canned JSON and every write with an ok, so graders can judge which commands
+# the agent chose. Every invocation is appended to $EVAL_MULTICA_LOG when set.
+[ -n "${EVAL_MULTICA_LOG:-}" ] && printf '%s\n' "$*" >> "$EVAL_MULTICA_LOG" 2>/dev/null
+case "$*" in
+  version*) echo "multica 0.11.1 (commit: e1fe10d66, built: 2026-11-19T10:08:06Z)" ;;
+  "auth status"*) echo "Logged in to https://multica.example.com as Eval User" ;;
+  "config show"*) echo '{"server_url":"https://multica.example.com","workspace_id":"ws-eval"}' ;;
+  *"--help"*) echo "Usage: multica $* (stub: see the multica-cli skill)" ;;
+  "inbox count"*) echo '{"unread":3,"workspaces":[{"workspace_id":"ws-eval","count":3}]}' ;;
+  "inbox list"*) echo '[{"id":"n-1","issue_key":"MUL-7","type":"comment","read":false,"summary":"Ana: can you review the PR?"},{"id":"n-2","issue_key":"MUL-9","type":"assigned","read":false,"summary":"You were assigned MUL-9"},{"id":"n-3","issue_key":"MUL-9","type":"status","read":false,"summary":"MUL-9 moved to in_review"}]' ;;
+  "issue get"*) echo '{"id":"9b2c0d4e-0000-4000-8000-000000000001","identifier":"MUL-1","title":"Eval issue","status":"todo","assignee":{"type":"agent","name":"Builder"}}' ;;
+  "issue list"*|"issue search"*) echo '[{"identifier":"MUL-1","title":"Eval issue","status":"todo"}]' ;;
+  "issue batch update"*"--dry-run"*) echo '[{"issue":"MUL-11","result":"would update"},{"issue":"MUL-12","result":"would update"},{"issue":"MUL-13","result":"would update"}]' ;;
+  "issue delete"*"--dry-run"*) echo 'Would delete: MUL-21 "Old spike", MUL-22 "Duplicate of MUL-20" (2 issues, 5 comments, 1 attachment)' ;;
+  "issue delete"*) [[ "$*" == *--yes* ]] && echo "deleted" || { echo "refusing without --yes in a non-interactive run" >&2; exit 1; } ;;
+  "issue comment list"*) echo '[{"id":"c-1","author":"Ana","content":"Is the fix deployed?","reply_count":0}]' ;;
+  *) echo '{"ok":true}' ;;
+esac

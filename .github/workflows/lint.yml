@@ -3,6 +3,11 @@ name: Lint
 # A skill that describes a CLI is only correct relative to a CLI version, so the
 # schedule matters as much as the push trigger: the CLI can move under a
 # repository that never changes, and that is exactly how this skill went stale.
+#
+# This fork tracks the owner's own Multica server, not upstream's latest release:
+# `server` lints against the release that server runs (MULTICA_SERVER_URL secret;
+# without it, latest). The server upgrades weekly and then starts an agent that
+# documents the drift in a PR; that PR merges itself only when every job below passes.
 on:
   push:
     branches: [main]
@@ -22,58 +27,27 @@ jobs:
       fail-fast: false
       matrix:
         # `min` is the version README/SKILL.md tell users to install, so every
-        # documented command must work there. `latest` catches new drift. Both
+        # documented command must work there. `server` catches new drift. Both
         # have to pass: dropping `min` lets the docs quietly raise the floor,
-        # dropping `latest` lets the CLI move out from under them.
-        cli: [min, latest]
+        # dropping `server` lets the CLI move out from under them.
+        cli: [min, server]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Resolve CLI version
         id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MULTICA_SERVER_URL: ${{ secrets.MULTICA_SERVER_URL }}
         run: |
-          set -euo pipefail
-          if [ "${{ matrix.cli }}" = "min" ]; then
-            version="v$(python3 -c 'import re,pathlib; print(re.search(r"MIN_CLI_VERSION = \"([^\"]+)\"", pathlib.Path("scripts/lint-skill-commands.py").read_text()).group(1))')"
-          else
-            version="$(curl -fsSL https://api.github.com/repos/multica-ai/multica/releases/latest | jq -r .tag_name)"
-          fi
+          version="$(scripts/resolve-cli-version.sh ${{ matrix.cli }})"
           echo "version=${version}" >> "${GITHUB_OUTPUT}"
           echo "Resolved ${{ matrix.cli }} -> ${version}"
 
       - name: Install the multica CLI
-        env:
-          VERSION: ${{ steps.resolve.outputs.version }}
         run: |
-          set -euo pipefail
-          asset="multica-cli-${VERSION#v}-linux-amd64.tar.gz"
-          base="https://github.com/multica-ai/multica/releases/download/${VERSION}"
-          mkdir -p "${RUNNER_TEMP}/multica-cli" "${HOME}/.local/bin"
-          curl -fsSL -o "${RUNNER_TEMP}/${asset}" "${base}/${asset}"
-          curl -fsSL -o "${RUNNER_TEMP}/checksums.txt" "${base}/checksums.txt"
-
-          # Verify before executing a downloaded binary. Anchor the filename to
-          # end-of-line and require exactly one match, so a substring can never
-          # satisfy the check.
-          cd "${RUNNER_TEMP}"
-          matches="$(grep -c -E "[[:space:]]${asset}$" checksums.txt || true)"
-          if [ "${matches}" != "1" ]; then
-            echo "::error::expected exactly 1 checksum entry for ${asset}, found ${matches}"
-            exit 1
-          fi
-          if ! grep -E "[[:space:]]${asset}$" checksums.txt | sha256sum --check --status; then
-            echo "::error::checksum verification failed for ${asset}"
-            exit 1
-          fi
-          echo "checksum OK: ${asset}"
-          cd - >/dev/null
-
-          tar -xzf "${RUNNER_TEMP}/${asset}" -C "${RUNNER_TEMP}/multica-cli"
-          install -m 0755 "${RUNNER_TEMP}/multica-cli/multica" "${HOME}/.local/bin/multica"
+          scripts/install-cli.sh "${{ steps.resolve.outputs.version }}"
           echo "${HOME}/.local/bin" >> "${GITHUB_PATH}"
-
-      - name: Show CLI version under test
-        run: multica version
 
       - name: Lint regression tests
         run: scripts/test-lint.py
@@ -85,3 +59,62 @@ jobs:
           else
             scripts/lint-skill-commands.py --verbose
           fi
+
+  # The checks below exist because agent PRs merge themselves. They skip (and so pass)
+  # for the repository owner, who reviews their own changes.
+  scope-guard:
+    name: Scope guard
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - name: Check what the PR changes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MULTICA_SERVER_URL: ${{ secrets.MULTICA_SERVER_URL }}
+        run: |
+          scripts/check-pr-scope.py \
+            --base "${{ github.event.pull_request.base.sha }}" \
+            --head "${{ github.event.pull_request.head.sha }}" \
+            --author "${{ github.event.pull_request.user.login }}" \
+            --owner "${{ github.repository_owner }}" \
+            --server-version "$(scripts/resolve-cli-version.sh server)"
+
+  evals:
+    name: Skill evals
+    # Same-repo PRs only: a fork's PR never gets the Claude token.
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - name: Install Claude Code, its Bash sandbox, and the server's multica CLI
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MULTICA_SERVER_URL: ${{ secrets.MULTICA_SERVER_URL }}
+        run: |
+          test -n "${CLAUDE_CODE_OAUTH_TOKEN}" || { echo "::error::CLAUDE_CODE_OAUTH_TOKEN secret is not set (claude setup-token)"; exit 1; }
+          sudo apt-get update -qq && sudo apt-get install -y -qq bubblewrap socat
+          curl -fsSL https://claude.ai/install.sh | bash
+          echo "${HOME}/.local/bin" >> "${GITHUB_PATH}"
+          scripts/install-cli.sh "$(scripts/resolve-cli-version.sh server)"
+      - name: Behaviour evals (stub CLI, no server)
+        run: scripts/run-evals.sh --runs 2 --threshold 1 --concurrency 4 --max-cost-usd 10 --json evals-result.json
+      - name: Behaviour claims are backed by --help
+        if: github.event.pull_request.user.login != github.repository_owner
+        run: scripts/check-claims.sh "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}"
+      - name: Keep the eval report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: evals
+          path: |
+            evals-result.json
+            evals/results/
+          if-no-files-found: ignore

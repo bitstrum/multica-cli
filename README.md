@@ -103,6 +103,21 @@ command exists that `SKILL.md` never mentions. Deliberate omissions belong in
 `UNDOCUMENTED_OK` in that script, with a reason. CI runs it on every push and
 on a daily schedule, so drift surfaces as a failure rather than as a stale skill.
 
+In this fork CI lints against the release the owner's Multica server runs
+(`MULTICA_SERVER_URL` secret; latest without it). The server upgrades weekly and
+then starts an agent that documents the drift in a pull request, which merges
+itself only when every check passes. A PR from anyone but the owner also has to
+pass:
+
+- `scripts/check-pr-scope.py`: docs, manifests and two regions of the lint script
+  only (never CI, tests or evals); floor no higher than the server's CLI; no
+  SKILL.md heading removed; plugin version bumped.
+- `scripts/run-evals.sh`: behaviour evals in `evals/` (`claude plugin eval`
+  against a stub `multica`, so no server is touched), such as "reading the inbox
+  changes nothing" and "a delete never passes `--yes` unasked".
+- `scripts/check-claims.sh`: an LLM check that every behaviour claim the PR adds
+  is backed by the CLI's `--help`.
+
 ## License
 
 [MIT](./LICENSE)
