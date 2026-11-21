@@ -67,8 +67,8 @@ cp -R skills/multica-cli/* ~/.cursor/skills/multica-cli/
 
 ## 前置条件
 
-- 本机已安装 `multica` CLI，且版本 **不低于 v0.9.0**。更早的版本缺少本 skill 依赖的
-  命令（尤其是 `issue delete`、`issue rerun-task`、`workflow`、`view` 和 `issue-status`），会直接报错。可用 `multica version` 确认。
+- 本机已安装 `multica` CLI，且版本 **不低于 v0.11.1**。更早的版本缺少本 skill 依赖的
+  命令（尤其是 `inbox`、`issue batch`、`issue pull-requests link` 和 `view create`），会直接报错。可用 `multica version` 确认。
 - 用户已通过 `multica login`（或 `multica setup`）完成认证。
 - 已选择目标 workspace / profile，或通过 `--workspace-id`、`--profile` 显式传入。
 

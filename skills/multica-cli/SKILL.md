@@ -20,15 +20,15 @@ multica auth status
 multica config show
 ```
 
-**This skill requires `multica` v0.9.0 or newer.** Several commands it relies
-on — notably `issue delete`, `issue rerun-task`, `workflow`, `view` and
-`issue-status` — do not exist in earlier versions, and an older CLI will reject
-them outright. If `multica version` reports anything below 0.9.0, stop and ask
+**This skill requires `multica` v0.11.1 or newer.** Several commands it relies
+on — notably `inbox`, `issue batch`, `issue pull-requests link`, `view create`
+and `issue delete` — do not exist in earlier versions, and an older CLI will
+reject them outright. If `multica version` reports anything below 0.11.1, stop and ask
 the user to upgrade (`brew upgrade multica-ai/tap/multica`, or `multica update`)
 rather than working around the missing commands. Self-hosted: keep the CLI at
 the server's version.
 
-**This file was last checked against `multica` v0.9.0.** The CLI ships faster
+**This file was last checked against `multica` v0.11.1.** The CLI ships faster
 than this skill. When `multica version` reports a newer version, assume
 commands or flags exist that this file does not describe: treat
 `multica <command> --help` as the source of truth, and check `multica --help`
@@ -87,18 +87,23 @@ multica issue comment list <id> --recent N --compact --output json              
 # Create / update
 multica issue create --title "..." [--description-file <path>] [--priority <p>] [--status <s>] [--assignee <name> | --assignee-id <uuid>] [--parent <id>] [--stage N] [--project <id>] [--due-date YYYY-MM-DD] [--start-date YYYY-MM-DD] [--attachment <path>] [--attachment-id <uuid>] [--allow-duplicate] --output json
 multica issue update <id> [--title "..."] [--description-file <path>] [--status <s>] [--priority <p>] [--assignee <name> | --assignee-id <uuid>] [--parent <id> | --parent ""] [--stage N] [--due-date YYYY-MM-DD] [--start-date YYYY-MM-DD] [--no-start]
+# Same change on many issues; one row per issue, non-zero exit if any was skipped. Dry-run first.
+multica issue batch update <id>... [--ids-stdin] [--status <s>] [--priority <p>] [--assignee <name> | --assignee-id <uuid> | --unassign] [--add-label <l>] [--remove-label <l>] [--property Name=Value] [--dry-run] [--no-start] --output json
 
 # Status / assignment — <status> is a status KEY. Built-in: backlog | todo | in_progress | in_review | done | blocked | cancelled;
 # a workspace can add custom keys (multica issue-status list). An unknown key errors with the full list.
 multica issue status <id> <status> [--no-start] [--duplicate-of <original-id>]   # --duplicate-of needs cancelled
 multica issue assign <id> --to <name> | --to-id <uuid> | --unassign [--no-start]
 
-# Saved views — read the issue lists people curate in the app
+# Saved views — the issue lists people curate in the app; writes show in their sidebar, see Saved Views
 multica view list --output json
 multica view issues <view> [--limit N] [--cursor <next_cursor>] [--fields id,identifier,title,status] --output json
+multica view create --name "..." [--status <s>]... [--assignee <name>]... [--label <l>]... [--visibility private|workspace] [--dry-run] --output json
+multica view update <view> [--status <s>]... [--clear-filters] [--dry-run] --output json
+multica view delete <view>
 
 # Delete — permanent; see Write Workflow
-multica issue delete <id>... [--yes]
+multica issue delete <id>... [--dry-run] [--yes]
 
 # Comment (write) — body always via file, see Write Workflow below
 # --parent is required when a comment triggered your task; see Issue Comments
@@ -141,6 +146,12 @@ multica issue wakeup events
 multica issue wakeup create <issue-id> (--event <type> | --until-status <s> | --kind at --after 10m | --kind every --every 1h | --kind cron --cron "<expr>") [--agent-id <uuid>] [--instruction-file <path>] [--expires-in 72h] [--max-fires N] [--parent <comment-id>]
 multica issue wakeup disable <issue-id> <wakeup-id>
 multica issue wakeup delete <issue-id> <wakeup-id>
+
+# Inbox — the signed-in person's notifications; reads are safe, writes change their state (see Inbox)
+multica inbox list [--unread] [--issue <key>] [--since 1d] [--archived | --snoozed] --output json
+multica inbox count --output json
+multica inbox read <notification-id>... | --issue <key>
+multica inbox archive <notification-id>...
 ```
 
 Note `issue assign` uses `--to` / `--to-id`, while `issue create` / `issue
@@ -210,12 +221,14 @@ Treat writes as side-effecting. If the user did not clearly ask for the write,
 ask before running it. This includes creating comments, issues, status changes,
 assignments, reruns, cancellations, deletions, label and property changes,
 agent mentions, squad mentions, workflow and status-catalog changes,
+saved-view, inbox and linked-PR changes, project archive/restore,
 webhook/autopilot changes, and repo checkout operations.
 
 `multica issue delete` cannot be undone: it removes the issue's comments and
 attachments, cancels its in-flight runs, and detaches (does not delete) its
-children. Delete only issues the user named, and pass `--yes` only after the
-user confirmed that exact list; without `--yes` a non-interactive run fails
+children. Delete only issues the user named. `--dry-run` checks the selection
+and your permission and lists what would go, so show the user that list and pass
+`--yes` only after they confirmed it; without `--yes` a non-interactive run fails
 without deleting, which is the safe outcome.
 
 ### File Paths Must Be Inside the Working Directory
@@ -354,6 +367,16 @@ multica project workflow get <project-id>
 multica workflow get <workflow> --output json    # "default" for the Default workflow
 ```
 
+`multica issue batch update` can start agent runs just like `issue update`,
+except that it can do so on every issue it changes; `--no-start` applies the
+change without starting any. Run it with `--dry-run` first and read the rows
+before writing.
+
+Archiving a project (`multica project archive <id>`) stops it accepting new
+issues and **pauses every autopilot that files into it**; `project restore`
+does not resume them. Tell the user which autopilots that affects before
+archiving. `project list` hides archived projects unless you pass `--archived`.
+
 Changing a workflow or its handoffs (`workflow create|update|delete`,
 `workflow handoff set`, `project workflow set`) rewires who gets woken for every
 issue that uses it; treat it as an admin change and do it only when asked.
@@ -417,6 +440,45 @@ re-enabling one is a write that needs the user's approval.
 - To stop a rule, `disable` keeps it for later; `delete` also withdraws runs
   that have not started.
 
+`multica chat wakeup` is a different command: it brings an agent back to a
+Multica chat conversation and is meant for an agent running inside that chat.
+For follow-ups on issue work, use the issue wakeups above.
+
+## Inbox
+
+`multica inbox` is the notification inbox of the account the CLI is signed in
+as — the user's own, not an agent's. `inbox list` and `inbox count` are
+read-only (`list` does not mark anything read), so use them to answer "what is
+waiting for me".
+
+- `read`, `unread`, `archive`, `unarchive`, `snooze` and `unsnooze` change what
+  the person sees as new or hidden. Run them only when the user asked for that
+  exact change, and the bulk forms (`read --all`, `archive --all|--read|--completed`)
+  only after they confirmed; those need `--yes`.
+- Writes act on the whole issue, not one notification: reading or archiving a
+  notification reads or archives every notification on that issue (`unread` is
+  the exception), and `snooze --until <time>` hides the issue until then.
+- The ids are notification ids from `inbox list --output json`, not issue ids;
+  `inbox read --issue <key>` addresses an issue by key.
+- With several ids, a failure on one does not stop the rest; the command exits
+  non-zero, so report which ones failed.
+- Inside a Multica-run agent task the server allows inbox access only when the
+  runtime owner is the human who triggered the task. A refusal there is a result
+  to report, not something to route around.
+
+## Saved Views
+
+`view create|update|duplicate|delete` write the same views the web app saves,
+so they appear in people's sidebars. `<view>` is an ID, ID prefix or exact
+name. Filters take the names shown in the UI; list flags repeat. Run with
+`--dry-run` first, then check the result with `multica view issues <view>`.
+
+- Views are private by default. `--visibility workspace` shares one with every
+  member; do that only when asked.
+- Only the owner can change or delete a private view; workspace owners and
+  admins can also change or delete a shared one. Inside an agent run, a new
+  view is owned by the runtime owner, not the agent.
+
 ## Pull Requests
 
 When code changes are made for a Multica issue, include the routable issue key
@@ -439,7 +501,11 @@ metadata:
 
 ```bash
 multica issue pull-requests <issue-id> --output json
+multica issue pull-requests link <issue-id> <pr-url>   # PR already synced, but its title/branch lacks the key
+multica issue pull-requests unlink <issue-id> <pr>     # URL, number or id; remembered until link restores it
 ```
+
+Linking and unlinking are writes; do them only when asked.
 
 ## When the CLI Cannot Do It
 
