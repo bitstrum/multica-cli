@@ -70,9 +70,9 @@ your tool loads skills or instructions from.
 
 ## Requirements
 
-- The `multica` CLI is installed locally, at **v0.9.0 or newer**. Earlier
-  versions lack commands the skill relies on (notably `issue delete`, `issue rerun-task`, `workflow`,
-  `view` and `issue-status`), and will reject them. Check with `multica version`.
+- The `multica` CLI is installed locally, at **v0.11.1 or newer**. Earlier
+  versions lack commands the skill relies on (notably `inbox`, `issue batch`,
+  `issue pull-requests link` and `view create`), and will reject them. Check with `multica version`.
 - The user has run `multica login` (or `multica setup`) to authenticate.
 - The intended workspace/profile is selected, or passed explicitly with
   `--workspace-id` and `--profile`.

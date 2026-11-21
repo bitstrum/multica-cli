@@ -2,8 +2,8 @@
 
 There are two ways to use the Multica CLI skill in Cursor.
 
-Both require the `multica` CLI at **v0.9.0 or newer** — earlier versions lack
-commands the skill and the rule rely on (notably `issue delete`, `issue rerun-task` and `workflow`). Check with
+Both require the `multica` CLI at **v0.11.1 or newer** — earlier versions lack
+commands the skill and the rule rely on (notably `inbox`, `issue batch` and `view create`). Check with
 `multica version`.
 
 ## Option 1: Personal Agent Skill (recommended)
