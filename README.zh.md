@@ -117,15 +117,19 @@ CI 在每次 push 和 pull request 时，对最低版本、每个标注版本和
 定时任务检查最新版本：新版本增加或修改命令时，它会创建或更新一个 `cli-drift` issue，
 而不是让运行失败。
 
-agent 提交的 PR 在所有检查通过后会自动合并，所以仓库所有者以外的 PR 还必须通过：
+agent 提交的 PR 在 lint 通过后会自动合并，所以仓库所有者以外的 PR 还必须通过
+`scripts/check-pr-scope.py`：只能改文档、manifest 和 lint 脚本中的 `UNDOCUMENTED_OK`
+区域（不能改 CI、测试、eval 或最低版本）；标注不高于最新版本；不删除 SKILL.md 的标题；
+插件版本号已提升。
 
-- `scripts/check-pr-scope.py`：只能改文档、manifest 和 lint 脚本中的 `UNDOCUMENTED_OK`
-  区域（不能改 CI、测试、eval 或最低版本）；标注不高于最新版本；不删除 SKILL.md 的标题；
-  插件版本号已提升。
+有两项检查需要 Claude，所以它们在贡献者自己的登录下运行，从不在 CI 中运行（这个公开
+仓库不保存任何 secret）：
+
+- `scripts/check-claims.sh <base> <head>`：由 LLM 检查改动新增的每条行为描述都有 CLI
+  `--help` 支持。
 - `scripts/run-evals.sh`：`evals/` 中的行为 eval（用 `claude plugin eval` 对着一个
   stub `multica` 运行，不会接触任何服务端），例如“读取 inbox 不改变任何状态”和
-  “删除时绝不擅自加 `--yes`”。
-- `scripts/check-claims.sh`：由 LLM 检查 PR 新增的每条行为描述都有 CLI `--help` 支持。
+  “删除时绝不擅自加 `--yes`”。在 Linux 上，eval 沙箱需要 `bubblewrap` 和 `socat`。
 
 ## 许可证
 

@@ -2,7 +2,7 @@
   "name": "multica-cli",
   "id": "multica-cli",
   "owner": {
-    "name": "multica-ai"
+    "name": "bitstrum"
   },
   "metadata": {
     "description": "Teach a local coding agent to operate Multica through the authenticated multica CLI",

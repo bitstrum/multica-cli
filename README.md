@@ -126,17 +126,21 @@ on every push and pull request. A daily run checks the latest release; when a ne
 release adds or changes commands, it opens or updates one `cli-drift` issue
 instead of failing.
 
-Pull requests from an agent merge themselves once every check is green, so a PR
-from anyone but the repository owner also has to pass:
+Pull requests from an agent merge themselves once the lint is green, so a PR from
+anyone but the repository owner also has to pass `scripts/check-pr-scope.py`: docs,
+manifests and the `UNDOCUMENTED_OK` region of the lint script only (never CI,
+tests, evals or the floor); no marker above the latest release; no SKILL.md
+heading removed; plugin version bumped.
 
-- `scripts/check-pr-scope.py`: docs, manifests and the `UNDOCUMENTED_OK` region of
-  the lint script only (never CI, tests, evals or the floor); no marker above the latest
-  release; no SKILL.md heading removed; plugin version bumped.
+Two checks need Claude, so they run on the contributor's own login and never in
+CI (this public repository holds no secrets):
+
+- `scripts/check-claims.sh <base> <head>`: an LLM check that every behaviour claim
+  a change adds is backed by the CLI's `--help`.
 - `scripts/run-evals.sh`: behaviour evals in `evals/` (`claude plugin eval`
   against a stub `multica`, so no server is touched), such as "reading the inbox
-  changes nothing" and "a delete never passes `--yes` unasked".
-- `scripts/check-claims.sh`: an LLM check that every behaviour claim the PR adds
-  is backed by the CLI's `--help`.
+  changes nothing" and "a delete never passes `--yes` unasked". On Linux the eval
+  sandbox needs `bubblewrap` and `socat`.
 
 ## License
 
