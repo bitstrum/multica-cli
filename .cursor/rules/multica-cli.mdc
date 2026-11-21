@@ -14,7 +14,8 @@ logged-in CLI and explicit approval to run commands.
 its companion skill were last checked against v0.11.1. Check the CLI with
 `multica version` and a self-hosted server with
 `curl -fsS <server_url from multica config show>/api/config` (its `server_version`;
-Multica Cloud omits it and always runs the latest release). If either is older than
+Multica Cloud omits it and always runs the latest release; a self-hosted server
+without it, or one that does not answer, is unknown: never assume the latest). If either is older than
 v0.6.0, stop and ask the user to upgrade (`multica update` for the CLI). The skill
 marks later commands with the release that added them, as `(vX.Y.Z+)`: skip
 any whose release is above the lower of the two versions and tell the user what it
