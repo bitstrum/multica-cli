@@ -4,7 +4,7 @@
 # flags exist; it cannot tell whether "this starts an agent run" or "this is read-only" is
 # true. That prose is this skill's whole value, so an agent PR that adds such a sentence
 # without support in --help fails here and waits for a human.
-# Needs `claude` (CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY) and `multica` on PATH.
+# Needs a logged-in `claude` and `multica` on PATH.
 set -euo pipefail
 base=${1:?base}; head=${2:?head}
 docs=(skills README.md README.zh.md CURSOR.md .cursor EXAMPLES.md)
