@@ -216,9 +216,10 @@ def main() -> int:
         run_case(linter, skill_body=block("multica frobnicate   # v99.0.0+") + covered),
         expect=None,
     )
+    cli = ".".join(map(str, linter.installed_version()))
     check(
-        "line marked at or below the CLI is still checked",
-        run_case(linter, skill_body=block("multica frobnicate   # v0.6.1+") + covered),
+        "line marked at the CLI's own version is still checked",
+        run_case(linter, skill_body=block(f"multica frobnicate   # v{cli}+") + covered),
         expect="has no command `frobnicate`",
     )
     check(

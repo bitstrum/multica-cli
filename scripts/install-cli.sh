@@ -13,4 +13,5 @@ curl -fsSL -o "$tmp/checksums.txt" "$base/checksums.txt"
 mkdir -p "$tmp/x" "$HOME/.local/bin"
 tar -xzf "$tmp/$asset" -C "$tmp/x"
 install -m 0755 "$tmp/x/multica" "$HOME/.local/bin/multica"
-"$HOME/.local/bin/multica" version | head -1
+# sed, not head: head exits early and the SIGPIPE fails the step under pipefail.
+"$HOME/.local/bin/multica" version | sed -n 1p
