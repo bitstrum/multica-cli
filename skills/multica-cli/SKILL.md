@@ -33,7 +33,7 @@ versions** in this session; one check covers the rest of it. Pass the same
 ```bash
 multica version        # the CLI
 multica config show    # server_url: the server this profile talks to
-curl -fsS <server_url>/api/config | grep -o '"server_version":"[^"]*"'
+curl -fsS <server_url>/api/config     # JSON; read its server_version field
 ```
 
 - Your working version is the lower of the two. A self-hosted server answers
@@ -41,6 +41,10 @@ curl -fsS <server_url>/api/config | grep -o '"server_version":"[^"]*"'
   `server_version` and always runs the latest release, so there the CLI decides.
   `/api/config` is public and needs no token; it is the only HTTP call this
   skill makes.
+- A self-hosted server that answers without `server_version` (a build without a
+  release stamp), or does not answer at all, has an unknown version. Do not
+  assume the latest: say so, and use only unmarked commands unless the user
+  tells you the server's release.
 - Skip everything marked above your working version: do not try it, and do not
   route around it. Tell the user which release it needs and who upgrades it: the
   CLI with `multica update` (or `brew upgrade multica-ai/tap/multica`), a
