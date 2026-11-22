@@ -142,6 +142,15 @@ CI (this public repository holds no secrets):
   changes nothing" and "a delete never passes `--yes` unasked". On Linux the eval
   sandbox needs `bubblewrap` and `socat`.
 
+## Status
+
+- **State:** plugin 1.5.1 on `main` describes multica v0.11.1, with release markers down to the v0.6.0 floor. CI lints the floor, every marked release and the latest, and holds no secrets.
+- **Next step:** check Multica issue FERF-144, where the owner's Chief of Staff agent is creating a maintainer agent and a weekly autopilot that turn `cli-drift` issues into self-merging docs PRs. Confirm that a manual trigger with no open drift issue leaves nothing on GitHub.
+- **Open:**
+  - The behaviour evals have never passed. Run `scripts/run-evals.sh` on Linux with `bubblewrap` and `socat`, and fix the cases. In the only run so far, the agent called `inbox` before checking versions.
+  - The maintainer agent's Claude login expires on 2026-12-22. Re-login steps are in the owner's homelab repo; a year-long `claude setup-token` is the alternative.
+- **Verify:** `gh run list -R bitstrum/multica-cli --branch main -L 1` is green; `scripts/lint-skill-commands.py --verbose` passes locally.
+
 ## License
 
 [MIT](./LICENSE)
